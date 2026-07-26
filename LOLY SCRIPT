@@ -1,0 +1,304 @@
+--[[\n    Script Name: LOLY\n    Made by: RINTHESLAYER\n]]--
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- Load Rayfield UI Library safely
+local success, Rayfield = pcall(function()
+   return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+end)
+
+if not success or not Rayfield then
+   warn("Failed to load Rayfield UI library.")
+   return
+end
+
+local Window = Rayfield:CreateWindow({
+   Name = "LOLY - by RINTHESLAYER",
+   LoadingTitle = "Loading LOLY Hub...",
+   LoadingSubtitle = "by RINTHESLAYER",
+   ConfigurationSaving = { Enabled = false },
+   KeySystem = false,
+})
+
+local Tab = Window:CreateTab("Combat & Melee", 4483362458)
+local Section = Tab:CreateSection("100% Hit Melee Aura & Targeting")
+
+-- Configuration Variables
+local rageActive = false
+local antiAimActive = false
+local attackSeconds = 3
+local hideSeconds = 3
+local selectedTargetSelection = "None (Nearest)"
+
+-- GUI Status Label inside Rayfield
+local StatusLabel = Tab:CreateLabel("Status: Idle / Ready")
+
+-- Create a Floating On-Screen Indicator (ScreenGui)
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "LolyStatusGui"
+screenGui.ResetOnSpawn = false
+
+if syn and syn.protect_gui then
+   syn.protect_gui(screenGui)
+   screenGui.Parent = CoreGui
+elseif gethui then
+   screenGui.Parent = gethui()
+else
+   screenGui.Parent = CoreGui
+end
+
+local statusFrame = Instance.new("Frame")
+statusFrame.Size = UDim2.new(0, 260, 0, 45)
+statusFrame.Position = UDim2.new(0.5, -130, 0, 15)
+statusFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+statusFrame.BorderSizePixel = 0
+statusFrame.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 8)
+uiCorner.Parent = statusFrame
+
+local uiStroke = Instance.new("UIStroke")
+uiStroke.Color = Color3.fromRGB(255, 0, 127)
+uiStroke.Thickness = 2
+uiStroke.Parent = statusFrame
+
+local statusText = Instance.new("TextLabel")
+statusText.Size = UDim2.new(1, 0, 1, 0)
+statusText.BackgroundTransparency = 1
+statusText.TextColor3 = Color3.fromRGB(255, 255, 255)
+statusText.TextSize = 14
+statusText.Font = Enum.Font.SourceSansBold
+statusText.Text = "LOLY [IDLE] - Waiting..."
+statusText.Parent = statusFrame
+
+-- Build Player List Table dynamically
+local function getPlayerList()
+   local list = {"None (Nearest)"}
+   for _, p in ipairs(Players:GetPlayers()) do
+      if p ~= LocalPlayer then
+         local displayText = string.format("%s (%s)", p.Name, p.DisplayName)
+         table.insert(list, displayText)
+      end
+   end
+   return list
+end
+
+-- Interactive Player Dropdown (Fixed Option extraction for Rayfield formatting)
+local PlayerDropdown = Tab:CreateDropdown({
+   Name = "Target Selector (Username / Nickname)",
+   Options = getPlayerList(),
+   CurrentOption = {"None (Nearest)"},
+   MultiSelection = false,
+   Flag = "PlayerDropdown",
+   Callback = function(Option)
+      if type(Option) == "table" then
+         selectedTargetSelection = Option[1] or "None (Nearest)"
+      elseif type(Option) == "string" then
+         selectedTargetSelection = Option
+      end
+   end,
+})
+
+-- Refresh player list automatically when players join or leave
+Players.PlayerAdded:Connect(function()
+   PlayerDropdown:Refresh(getPlayerList(), true)
+end)
+Players.PlayerRemoving:Connect(function()
+   PlayerDropdown:Refresh(getPlayerList(), true)
+end)
+
+-- Toggles & Sliders
+Tab:CreateToggle({
+   Name = "Enable 100% Hit Melee Aura",
+   CurrentValue = false,
+   Flag = "RageToggle",
+   Callback = function(Value)
+      rageActive = Value
+   end,
+})
+
+Tab:CreateToggle({
+   Name = "Enable Anti-Aim Spin",
+   CurrentValue = false,
+   Flag = "AntiAimToggle",
+   Callback = function(Value)
+      antiAimActive = Value
+   end,
+})
+
+Tab:CreateSlider({
+   Name = "Attack Seconds",
+   Range = {1, 10},
+   Increment = 1,
+   Suffix = "s",
+   CurrentValue = 3,
+   Flag = "AttackSlider",
+   Callback = function(Value)
+      attackSeconds = Value
+   end,
+})
+
+Tab:CreateSlider({
+   Name = "Hide / Void Seconds",
+   Range = {1, 10},
+   Increment = 1,
+   Suffix = "s",
+   CurrentValue = 3,
+   Flag = "HideSlider",
+   Callback = function(Value)
+      hideSeconds = Value
+   end,
+})
+
+-- Helper: Get Target RootPart securely by exact parsing
+local function getTargetRoot(myRoot)
+   if selectedTargetSelection and selectedTargetSelection ~= "None (Nearest)" then
+      for _, p in ipairs(Players:GetPlayers()) do
+         if p ~= LocalPlayer then
+            local formattedName = string.format("%s (%s)", p.Name, p.DisplayName)
+            if formattedName == selectedTargetSelection or p.Name == selectedTargetSelection then
+               if p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                  local hum = p.Character:FindFirstChild("Humanoid")
+                  if hum and hum.Health > 0 then
+                     return p.Character.HumanoidRootPart
+                  end
+               end
+               return nil
+            end
+         end
+      end
+   end
+
+   -- Fallback: Nearest Player
+   local nearestDist = math.huge
+   local bestRoot = nil
+   for _, p in ipairs(Players:GetPlayers()) do
+      if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+         local hum = p.Character:FindFirstChild("Humanoid")
+         if hum and hum.Health > 0 then
+            local dist = (myRoot.Position - p.Character.HumanoidRootPart.Position).Magnitude
+            if dist < nearestDist then
+               nearestDist = dist
+               bestRoot = p.Character.HumanoidRootPart
+            end
+         end
+      end
+   end
+   return bestRoot
+end
+
+-- Helper: Find Safest Void
+local function getSafestVoidPosition(targetRootPos)
+   local furthestPos = LocalPlayer.Character.HumanoidRootPart.Position
+   local maxDist = 0
+   
+   for _, obj in ipairs(workspace:GetChildren()) do
+      if obj:IsA("BasePart") then
+         local dist = (obj.Position - targetRootPos).Magnitude
+         if dist > maxDist then
+            maxDist = dist
+            furthestPos = obj.Position + Vector3.new(0, 5, 0)
+         end
+      end
+   end
+   return furthestPos
+end
+
+-- Helper: Force 100% Hit Connection
+local function forceHitTarget(targetRoot)
+   if not targetRoot or not LocalPlayer.Character then return end
+   local myChar = LocalPlayer.Character
+   
+   for _, tool in ipairs(myChar:GetChildren()) do
+      if tool:IsA("Tool") then
+         tool:Activate()
+         for _, part in ipairs(tool:GetDescendants()) do
+            if part:IsA("BasePart") then
+               part.CFrame = targetRoot.CFrame
+               if firetouchinterest then
+                  firetouchinterest(part, targetRoot, 0)
+                  firetouchinterest(part, targetRoot, 1)
+               end
+            end
+         end
+      end
+   end
+end
+
+-- Dedicated Anti-Aim Engine
+RunService.RenderStepped:Connect(function()
+   if not antiAimActive then return end
+   local char = LocalPlayer.Character
+   if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+   local rootPart = char.HumanoidRootPart
+   
+   local currentPos = rootPart.Position
+   local randomAngle = math.rad(math.random(0, 360))
+   rootPart.CFrame = CFrame.new(currentPos) * CFrame.Angles(0, randomAngle, 0)
+end)
+
+-- Main 100% Hit Melee Aura State Machine Loop with Instant Dropdown Tracking
+task.spawn(function()
+   while true do
+      task.wait(0.05)
+      if rageActive then
+         local char = LocalPlayer.Character
+         if char and char:FindFirstChild("HumanoidRootPart") then
+            local rootPart = char.HumanoidRootPart
+            local targetRoot = getTargetRoot(rootPart)
+
+            if targetRoot then
+               local attackStartTime = tick()
+               
+               -- ATTACK PHASE: Instantly locks and updates targets mid-swing
+               while rageActive and (tick() - attackStartTime) < attackSeconds do
+                  local liveTargetRoot = getTargetRoot(rootPart)
+                  if not liveTargetRoot then break end
+                  
+                  local targetPosRef = liveTargetRoot.Position
+                  rootPart.CFrame = CFrame.new(targetPosRef + Vector3.new(0, 0, 1.5), targetPosRef)
+                  forceHitTarget(liveTargetRoot)
+                  
+                  local msg = string.format("LOLY [ATTACKING] (%ds / %.1fs)", attackSeconds, (tick() - attackStartTime))
+                  StatusLabel:Set("Status: " .. msg)
+                  statusText.Text = msg
+                  task.wait(0.02)
+               end
+
+               if not rageActive then break end
+
+               -- HIDE PHASE: Instantly breaks hiding if you switch dropdown target
+               local lastSelectedTarget = selectedTargetSelection
+               local finalTarget = getTargetRoot(rootPart)
+               local safeVoidPos = getSafestVoidPosition(finalTarget and finalTarget.Position or rootPart.Position)
+               local hideStartTime = tick()
+
+               while rageActive and (tick() - hideStartTime) < hideSeconds do
+                  if selectedTargetSelection ~= lastSelectedTarget then
+                     break -- Break hiding immediately to target the newly picked dropdown player!
+                  end
+
+                  rootPart.CFrame = CFrame.new(safeVoidPos)
+                  
+                  local msg = string.format("LOLY [HIDING] (%ds / %.1fs)", hideSeconds, (tick() - hideStartTime))
+                  StatusLabel:Set("Status: " .. msg)
+                  statusText.Text = msg
+                  task.wait(0.05)
+               end
+            else
+               StatusLabel:Set("Status: [IDLE] Waiting for Target...")
+               statusText.Text = "LOLY [IDLE] - Waiting for Target..."
+               task.wait(0.5)
+            end
+         end
+      else
+         StatusLabel:Set("Status: [IDLE] Paused")
+         statusText.Text = "LOLY [IDLE] - Paused"
+         task.wait(0.5)
+      end
+   end
+end)
