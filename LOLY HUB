@@ -1,0 +1,346 @@
+--[[\n    Script Name: LOLY\n    Made by: RINTHESLAYER\n]]--
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+local LocalPlayer = Players.LocalPlayer
+
+-- Load Rayfield UI Library safely
+local success, Rayfield = pcall(function()
+   return loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+end)
+
+if not success or not Rayfield then
+   warn("Failed to load Rayfield UI library.")
+   return
+end
+
+local Window = Rayfield:CreateWindow({
+   Name = "LOLY - by RINTHESLAYER",
+   LoadingTitle = "Loading LOLY Hub...",
+   LoadingSubtitle = "by RINTHESLAYER",
+   ConfigurationSaving = { Enabled = false },
+   KeySystem = false,
+})
+
+local Tab = Window:CreateTab("Combat & Melee", 4483362458)
+local Section = Tab:CreateSection("100% Hit Melee Aura & Targeting")
+
+-- Configuration Variables
+local rageActive = false
+local antiAimActive = false
+local attackSeconds = 3
+local hideSeconds = 3
+local selectedTargetSelection = "None (Nearest)"
+
+-- Rayfield Toggle Reference
+local rageToggleReference = nil
+
+-- GUI Status Label inside Rayfield
+local StatusLabel = Tab:CreateLabel("Status: Idle / Ready")
+
+-- Create a Floating On-Screen Indicator (ScreenGui)
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "LolyStatusGui"
+screenGui.ResetOnSpawn = false
+
+if syn and syn.protect_gui then
+   syn.protect_gui(screenGui)
+   screenGui.Parent = CoreGui
+elseif gethui then
+   screenGui.Parent = gethui()
+else
+   screenGui.Parent = CoreGui
+end
+
+local statusFrame = Instance.new("Frame")
+statusFrame.Size = UDim2.new(0, 260, 0, 45)
+statusFrame.Position = UDim2.new(0.5, -130, 0, 15)
+statusFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+statusFrame.BorderSizePixel = 0
+statusFrame.Parent = screenGui
+
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 8)
+uiCorner.Parent = statusFrame
+
+local uiStroke = Instance.new("UIStroke")
+uiStroke.Color = Color3.fromRGB(255, 0, 127)
+uiStroke.Thickness = 2
+uiStroke.Parent = statusFrame
+
+local statusText = Instance.new("TextLabel")
+statusText.Size = UDim2.new(1, 0, 1, 0)
+statusText.BackgroundTransparency = 1
+statusText.TextColor3 = Color3.fromRGB(255, 255, 255)
+statusText.TextSize = 14
+statusText.Font = Enum.Font.SourceSansBold
+statusText.Text = "LOLY [IDLE] - Waiting..."
+statusText.Parent = statusFrame
+
+-- Build Player List Table dynamically
+local function getPlayerList()
+   local list = {"None (Nearest)"}
+   for _, p in ipairs(Players:GetPlayers()) do
+      if p ~= LocalPlayer then
+         local displayText = string.format("%s (%s)", p.Name, p.DisplayName)
+         table.insert(list, displayText)
+      end
+   end
+   return list
+end
+
+-- Interactive Player Dropdown
+local PlayerDropdown = Tab:CreateDropdown({
+   Name = "Target Selector (Username / Nickname)",
+   Options = getPlayerList(),
+   CurrentOption = {"None (Nearest)"},
+   MultiSelection = false,
+   Flag = "PlayerDropdown",
+   Callback = function(Option)
+      local newTarget = ""
+      if type(Option) == "table" then
+         newTarget = Option[1] or "None (Nearest)"
+      elseif type(Option) == "string" then
+         newTarget = Option
+      end
+      
+      if selectedTargetSelection ~= newTarget then
+         selectedTargetSelection = newTarget
+      end
+   end,
+})
+
+Players.PlayerAdded:Connect(function()
+   PlayerDropdown:Refresh(getPlayerList(), true)
+end)
+Players.PlayerRemoving:Connect(function()
+   PlayerDropdown:Refresh(getPlayerList(), true)
+end)
+
+-- Toggles & Sliders
+rageToggleReference = Tab:CreateToggle({
+   Name = "Enable 100% Hit Melee Aura",
+   CurrentValue = false,
+   Flag = "RageToggle",
+   Callback = function(Value)
+      rageActive = Value
+   end,
+})
+
+Tab:CreateToggle({
+   Name = "Enable Anti-Aim Spin",
+   CurrentValue = false,
+   Flag = "AntiAimToggle",
+   Callback = function(Value)
+      antiAimActive = Value
+   end,
+})
+
+Tab:CreateSlider({
+   Name = "Attack Seconds",
+   Range = {1, 10},
+   Increment = 1,
+   Suffix = "s",
+   CurrentValue = 3,
+   Flag = "AttackSlider",
+   Callback = function(Value)
+      attackSeconds = Value
+   end,
+})
+
+Tab:CreateSlider({
+   Name = "Void Hide Seconds",
+   Range = {1, 10},
+   Increment = 1,
+   Suffix = "s",
+   CurrentValue = 3,
+   Flag = "HideSlider",
+   Callback = function(Value)
+      hideSeconds = Value
+   end,
+})
+
+-- Helper: Get Target RootPart securely
+local function getTargetRoot(myRoot)
+   if selectedTargetSelection and selectedTargetSelection ~= "None (Nearest)" then
+      for _, p in ipairs(Players:GetPlayers()) do
+         if p ~= LocalPlayer then
+            local formattedName = string.format("%s (%s)", p.Name, p.DisplayName)
+            if formattedName == selectedTargetSelection or p.Name == selectedTargetSelection then
+               if p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+                  local hum = p.Character:FindFirstChild("Humanoid")
+                  if hum and hum.Health > 0 then
+                     return p.Character.HumanoidRootPart
+                  end
+               end
+               return nil
+            end
+         end
+      end
+      return nil
+   end
+
+   -- Fallback: Nearest Player
+   local nearestDist = math.huge
+   local bestRoot = nil
+   for _, p in ipairs(Players:GetPlayers()) do
+      if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+         local hum = p.Character:FindFirstChild("Humanoid")
+         if hum and hum.Health > 0 then
+            local dist = (myRoot.Position - p.Character.HumanoidRootPart.Position).Magnitude
+            if dist < nearestDist then
+               nearestDist = dist
+               bestRoot = p.Character.HumanoidRootPart
+            end
+         end
+      end
+   end
+   return bestRoot
+end
+
+-- FIXED: Sets Void Hide Y-Level directly to -50000 with target's X and Z coordinates, and instantly zeroing velocities to prevent fall momentum bugs
+local function getVoid50kHidePosition(targetRootPos)
+   return Vector3.new(targetRootPos.X, -50000, targetRootPos.Z)
+end
+
+-- Helper: Force 100% Hit Connection
+local function forceHitTarget(targetRoot)
+   if not targetRoot or not LocalPlayer.Character then return end
+   local myChar = LocalPlayer.Character
+   
+   for _, tool in ipairs(myChar:GetChildren()) do
+      if tool:IsA("Tool") then
+         tool:Activate()
+         for _, part in ipairs(tool:GetDescendants()) do
+            if part:IsA("BasePart") then
+               part.CFrame = targetRoot.CFrame
+               if firetouchinterest then
+                  firetouchinterest(part, targetRoot, 0)
+                  firetouchinterest(part, targetRoot, 1)
+               end
+            end
+         end
+      end
+   end
+end
+
+-- Dedicated Anti-Aim Engine
+RunService.RenderStepped:Connect(function()
+   if not antiAimActive then return end
+   local char = LocalPlayer.Character
+   if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+   local rootPart = char.HumanoidRootPart
+   
+   local currentPos = rootPart.Position
+   local randomAngle = math.rad(math.random(0, 360))
+   rootPart.CFrame = CFrame.new(currentPos) * CFrame.Angles(0, randomAngle, 0)
+end)
+
+-- Character Death Watcher
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+   local humanoid = newChar:WaitForChild("Humanoid", 5)
+   if humanoid then
+      humanoid.Died:Connect(function()
+         rageActive = false
+         if rageToggleReference and type(rageToggleReference.Set) == "function" then
+            pcall(function()
+               rageToggleReference:Set(false)
+            end)
+         end
+         StatusLabel:Set("Status: [DIED] Melee Rage Auto-Disabled")
+         statusText.Text = "LOLY [DIED] - Resetting..."
+      end)
+   end
+end)
+
+if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+   LocalPlayer.Character.Humanoid.Died:Connect(function()
+      rageActive = false
+      if rageToggleReference and type(rageToggleReference.Set) == "function" then
+         pcall(function()
+            rageToggleReference:Set(false)
+         end)
+      end
+      StatusLabel:Set("Status: [DIED] Melee Rage Auto-Disabled")
+      statusText.Text = "LOLY [DIED] - Resetting..."
+   end)
+end
+
+-- Main 100% Hit Melee Aura State Machine Loop
+task.spawn(function()
+   while true do
+      task.wait(0.05)
+      if rageActive then
+         local char = LocalPlayer.Character
+         local hum = char and char:FindFirstChildOfClass("Humanoid")
+         if char and hum and hum.Health > 0 and char:FindFirstChild("HumanoidRootPart") then
+            local rootPart = char.HumanoidRootPart
+            local currentTrackedTarget = selectedTargetSelection
+            local targetRoot = getTargetRoot(rootPart)
+
+            if targetRoot then
+               local attackStartTime = tick()
+               
+               -- ATTACK PHASE
+               while rageActive and hum.Health > 0 and selectedTargetSelection == currentTrackedTarget and (tick() - attackStartTime) < attackSeconds do
+                  local liveTargetRoot = getTargetRoot(rootPart)
+                  if not liveTargetRoot then break end
+                  
+                  local targetPosRef = liveTargetRoot.Position
+                  rootPart.CFrame = CFrame.new(targetPosRef + Vector3.new(0, 0, 1.5), targetPosRef)
+                  forceHitTarget(liveTargetRoot)
+                  
+                  local msg = string.format("LOLY [ATTACKING] (%ds / %.1fs)", attackSeconds, (tick() - attackStartTime))
+                  StatusLabel:Set("Status: " .. msg)
+                  statusText.Text = msg
+                  task.wait(0.02)
+               end
+
+               if not rageActive or hum.Health <= 0 or selectedTargetSelection ~= currentTrackedTarget then
+                  StatusLabel:Set("Status: [IDLE] Paused")
+                  statusText.Text = "LOLY [IDLE] - Paused"
+                  task.wait(0.2)
+                  continue
+               end
+
+               -- VOID HIDE PHASE (Teleports to -50,000 Y-level and locks velocity/assembly linear velocity to avoid damage triggers)
+               local hidePos = getVoid50kHidePosition(targetRoot.Position)
+               rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+               rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+               rootPart.CFrame = CFrame.new(hidePos)
+               local hideStartTime = tick()
+
+               while rageActive and hum.Health > 0 and selectedTargetSelection == currentTrackedTarget and (tick() - hideStartTime) < hideSeconds do
+                  local liveTarget = getTargetRoot(rootPart)
+                  if liveTarget then
+                     hidePos = getVoid50kHidePosition(liveTarget.Position)
+                  end
+                  rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                  rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                  rootPart.CFrame = CFrame.new(hidePos)
+                  
+                  local msg = string.format("LOLY [VOID HIDE -50K] (%ds / %.1fs)", hideSeconds, (tick() - hideStartTime))
+                  StatusLabel:Set("Status: " .. msg)
+                  statusText.Text = msg
+                  task.wait(0.05)
+               end
+
+               if not rageActive or hum.Health <= 0 or selectedTargetSelection ~= currentTrackedTarget then
+                  StatusLabel:Set("Status: [IDLE] Paused")
+                  statusText.Text = "LOLY [IDLE] - Paused"
+                  task.wait(0.2)
+               end
+            else
+               StatusLabel:Set("Status: [IDLE] Waiting for Target...")
+               statusText.Text = "LOLY [IDLE] - Waiting for Target..."
+               task.wait(0.5)
+            end
+         end
+      else
+         StatusLabel:Set("Status: [IDLE] Paused")
+         statusText.Text = "LOLY [IDLE] - Paused"
+         task.wait(0.5)
+      end
+   end
+end)
