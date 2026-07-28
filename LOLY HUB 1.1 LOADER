@@ -1,0 +1,227 @@
+-- Ensure the script doesn't execute twice
+if cloneref then 
+    cloneref(game:GetService("CoreGui")):FindFirstChild("RivalsHub") and cloneref(game:GetService("CoreGui")):FindFirstChild("RivalsHub"):Destroy()
+elseif game:GetService("CoreGui"):FindFirstChild("RivalsHub") then
+    game:GetService("CoreGui"):FindFirstChild("RivalsHub"):Destroy()
+end
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+
+-- Create Main ScreenGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "RivalsHub"
+ScreenGui.Parent = CoreGui
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Name = "MainFrame"
+MainFrame.Parent = ScreenGui
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+MainFrame.BorderSizePixel = 0
+MainFrame.Position = UDim2.new(0.5, -200, 0.5, -150)
+MainFrame.Size = UDim2.new(0, 400, 0, 320)
+MainFrame.Active = true
+MainFrame.Draggable = true
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 8)
+MainCorner.Parent = MainFrame
+
+-- Top Bar Header
+local Header = Instance.new("Frame")
+Header.Name = "Header"
+Header.Parent = MainFrame
+Header.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+Header.BorderSizePixel = 0
+Header.Size = UDim2.new(1, 0, 0, 40)
+
+local HeaderCorner = Instance.new("UICorner")
+HeaderCorner.CornerRadius = UDim.new(0, 8)
+HeaderCorner.Parent = Header
+
+local Title = Instance.new("TextLabel")
+Title.Parent = Header
+Title.BackgroundTransparency = 1
+Title.Position = UDim2.new(0, 15, 0, 0)
+Title.Size = UDim2.new(0, 200, 1, 0)
+Title.Font = Enum.Font.GothamBold
+Title.Text = "RIVALS | Functional Silent Aim"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 14
+Title.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Close Button
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Parent = Header
+CloseBtn.BackgroundColor3 = Color3.fromRGB(230, 50, 50)
+CloseBtn.Position = UDim2.new(1, -30, 0.5, -10)
+CloseBtn.Size = UDim2.new(0, 20, 0, 20)
+CloseBtn.Font = Enum.Font.GothamBold
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.TextSize = 12
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 4)
+CloseCorner.Parent = CloseBtn
+
+CloseBtn.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+-- Content Container
+local Container = Instance.new("ScrollingFrame")
+Container.Parent = MainFrame
+Container.Active = true
+Container.BackgroundColor3 = Color3.fromRGB(25, 25, 32)
+Container.BorderSizePixel = 0
+Container.Position = UDim2.new(0, 10, 0, 50)
+Container.Size = UDim2.new(1, -20, 1, -60)
+Container.CanvasSize = UDim2.new(0, 0, 1.5, 0)
+Container.ScrollBarThickness = 4
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Parent = Container
+UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 10)
+
+-- Silent Aim Config Variables
+local SilentAimEnabled = false
+local FOVRadius = 150
+
+-- FOV Circle Drawing Utility (Using Drawing API standard for exploits)
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Visible = false
+FOVCircle.Transparency = 0.7
+FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+FOVCircle.Thickness = 1
+FOVCircle.NumSides = 64
+FOVCircle.Radius = FOVRadius
+FOVCircle.Filled = false
+
+-- Function to get the closest target to the mouse/crosshair within FOV
+local function GetClosestPlayer()
+    local target = nil
+    local shortestDistance = FOVRadius
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                -- Optional team check (modify if Rivals uses a specific team setup)
+                if player.Team ~= LocalPlayer.Team or not player.Team then
+                    local rootPart = player.Character.HumanoidRootPart
+                    local screenPoint, onScreen = Camera:WorldToViewportPoint(rootPart.Position)
+                    
+                    if onScreen then
+                        local mousePos = UserInputService:GetMouseLocation()
+                        local distance = (Vector2.new(screenPoint.X, screenPoint.Y) - mousePos).Magnitude
+                        
+                        if distance < shortestDistance then
+                            shortestDistance = distance
+                            target = player.Character:FindFirstChild("Head") or rootPart -- Target Head if available
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+
+-- Functional Silent Aim Hook using __namecall to intercept hit registration/raycasts
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    local args = {...}
+    
+    -- Intercept remote calls or raycasts commonly used by weapon systems
+    if SilentAimEnabled and (method == "FireServer" or method == "InvokeServer") then
+        local targetPart = GetClosestPlayer()
+        if targetPart then
+            -- Check if arguments contain a target position or direction vector and manipulate it
+            for i, v in ipairs(args) do
+                if typeof(v) == "Vector3" then
+                    -- Redirect vector to target's position
+                    args[i] = targetPart.Position
+                end
+            end
+        end
+    end
+    
+    return oldNamecall(self, unpack(args))
+end)
+
+-- UI Toggle Creator Helper
+function CreateToggle(name, defaultState, callback)
+    local ToggleBtn = Instance.new("TextButton")
+    ToggleBtn.Parent = Container
+    ToggleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    ToggleBtn.Size = UDim2.new(0, 360, 0, 40)
+    ToggleBtn.Font = Enum.Font.Gotham
+    ToggleBtn.Text = "  " .. name .. ": [" .. (defaultState and "ON" or "OFF") .. "]"
+    ToggleBtn.TextColor3 = defaultState and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(200, 200, 200)
+    ToggleBtn.TextSize = 13
+    ToggleBtn.TextXAlignment = Enum.TextXAlignment.Left
+
+    local ToggleCorner = Instance.new("UICorner")
+    ToggleCorner.CornerRadius = UDim.new(0, 6)
+    ToggleCorner.Parent = ToggleBtn
+
+    local enabled = defaultState
+    ToggleBtn.MouseButton1Click:Connect(function()
+        enabled = not enabled
+        if enabled then
+            ToggleBtn.TextColor3 = Color3.fromRGB(50, 255, 50)
+            ToggleBtn.Text = "  " .. name .. ": [ON]"
+        else
+            ToggleBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+            ToggleBtn.Text = "  " .. name .. ": [OFF]"
+        end
+        callback(enabled)
+    end)
+end
+
+-- Add Toggles to UI
+CreateToggle("Silent Aim Enabled", false, function(state)
+    SilentAimEnabled = state
+end)
+
+CreateToggle("Show FOV Circle", false, function(state)
+    FOVCircle.Visible = state
+end)
+
+CreateToggle("Fullbright", false, function(state)
+    if state then
+        game:GetService("Lighting").Brightness = 2
+        game:GetService("Lighting").GlobalShadows = false
+    else
+        game:GetService("Lighting").Brightness = 1
+        game:GetService("Lighting").GlobalShadows = true
+    end
+end)
+
+-- Update FOV circle position continuously
+RunService.RenderStepped:Connect(function()
+    if FOVCircle.Visible then
+        local mousePos = UserInputService:GetMouseLocation()
+        FOVCircle.Position = mousePos
+        FOVCircle.Radius = FOVRadius
+    end
+end)
+
+-- Toggle UI visibility keybind (Right Shift)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.RightShift then
+        MainFrame.Visible = not MainFrame.Visible
+    end
+end)
+
+print("Functional Silent Aim Hub Loaded Successfully. Press Right Shift to toggle GUI.")
