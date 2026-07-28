@@ -1,0 +1,582 @@
+-- ============================================================
+--   Lol V1 | Rivals Hub
+--   Silent Aim + Unlock All + Fly + Noclip + More
+--   GUI: Press [RightShift] on PC | Tap "LoL" button on Mobile
+-- ============================================================
+
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local Lighting         = game:GetService("Lighting")
+local Camera           = workspace.CurrentCamera
+local LocalPlayer      = Players.LocalPlayer
+
+-- ============================================================
+--  ANTI-CRASH
+-- ============================================================
+pcall(function()
+    game:GetService("ScriptContext").Error:Connect(function(msg)
+        if msg and (msg:find("pipeline") or msg:find("overflow") or msg:find("memory")) then
+            warn("[Lol V1] Caught crash signal: " .. msg)
+        end
+    end)
+end)
+task.spawn(function()
+    while task.wait(30) do pcall(collectgarbage, "collect") end
+end)
+
+-- ============================================================
+--  GUI PARENT (works on ALL executors)
+-- ============================================================
+-- Destroy old instance if re-running
+pcall(function()
+    local old = (gethui and gethui() or game:GetService("CoreGui")):FindFirstChild("LolV1GUI")
+    if old then old:Destroy() end
+end)
+pcall(function()
+    local old = LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild("LolV1GUI")
+    if old then old:Destroy() end
+end)
+
+local GuiParent
+if gethui then
+    GuiParent = gethui()
+elseif syn and syn.protect_gui then
+    GuiParent = game:GetService("CoreGui")
+else
+    GuiParent = LocalPlayer:WaitForChild("PlayerGui")  -- safest fallback
+end
+
+-- ============================================================
+--  SCREEN GUI
+-- ============================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name            = "LolV1GUI"
+ScreenGui.ResetOnSpawn    = false
+ScreenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
+ScreenGui.IgnoreGuiInset  = true
+ScreenGui.DisplayOrder    = 999
+if syn and syn.protect_gui then pcall(syn.protect_gui, ScreenGui) end
+ScreenGui.Parent = GuiParent
+
+-- ============================================================
+--  THEME
+-- ============================================================
+local C = {
+    Bg      = Color3.fromRGB(13, 13, 20),
+    Header  = Color3.fromRGB(20, 20, 32),
+    Card    = Color3.fromRGB(25, 25, 38),
+    Accent  = Color3.fromRGB(100, 100, 255),
+    Green   = Color3.fromRGB(50,  220, 100),
+    Red     = Color3.fromRGB(235, 60,  60),
+    Text    = Color3.fromRGB(230, 230, 240),
+    Muted   = Color3.fromRGB(120, 120, 150),
+    White   = Color3.new(1,1,1),
+}
+
+local function Corner(p, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r or 8)
+    c.Parent = p
+end
+local function Stroke(p, col, thick)
+    local s = Instance.new("UIStroke")
+    s.Color = col or C.Accent
+    s.Thickness = thick or 1.5
+    s.Parent = p
+end
+
+-- ============================================================
+--  FLOATING TOGGLE BUTTON  ("LoL")
+-- ============================================================
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Name             = "LoLToggle"
+ToggleBtn.Size             = UDim2.new(0, 65, 0, 50)
+ToggleBtn.Position         = UDim2.new(0, 20, 0.5, -25)
+ToggleBtn.BackgroundColor3 = C.Header
+ToggleBtn.Text             = "LoL"
+ToggleBtn.TextColor3       = C.White
+ToggleBtn.Font             = Enum.Font.GothamBold
+ToggleBtn.TextSize         = 16
+ToggleBtn.BorderSizePixel  = 0
+ToggleBtn.ZIndex           = 100
+Corner(ToggleBtn, 10)
+Stroke(ToggleBtn, C.Accent, 1.5)
+ToggleBtn.Parent = ScreenGui
+
+-- Draggable toggle button (mobile safe)
+do
+    local dragging, dragInput, dragStart, startPos = false, nil, nil, nil
+    local function update(inp)
+        local delta = inp.Position - dragStart
+        ToggleBtn.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+    ToggleBtn.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragInput = inp
+            dragStart = inp.Position
+            startPos  = ToggleBtn.Position
+            inp.Changed:Connect(function()
+                if inp.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    ToggleBtn.InputChanged:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch then
+            dragInput = inp
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(inp)
+        if dragging and inp == dragInput then update(inp) end
+    end)
+end
+
+-- ============================================================
+--  MAIN FRAME
+-- ============================================================
+local MainFrame = Instance.new("Frame")
+MainFrame.Name             = "MainFrame"
+MainFrame.Size             = UDim2.new(0, 480, 0, 420)
+MainFrame.Position         = UDim2.new(0.5, -240, 0.5, -210)
+MainFrame.BackgroundColor3 = C.Bg
+MainFrame.BorderSizePixel  = 0
+MainFrame.Visible          = false   -- starts HIDDEN
+MainFrame.ZIndex           = 10
+Corner(MainFrame, 12)
+Stroke(MainFrame, Color3.fromRGB(50, 50, 80), 1.5)
+MainFrame.Parent = ScreenGui
+
+-- Draggable main frame via header
+local Header = Instance.new("Frame")
+Header.Size             = UDim2.new(1, 0, 0, 52)
+Header.BackgroundColor3 = C.Header
+Header.BorderSizePixel  = 0
+Header.ZIndex           = 11
+Corner(Header, 12)
+Header.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Size               = UDim2.new(1, -60, 1, 0)
+Title.Position           = UDim2.new(0, 16, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text               = "⚔  RIVALS | Lol V1"
+Title.TextColor3         = C.White
+Title.Font               = Enum.Font.GothamBold
+Title.TextSize           = 15
+Title.TextXAlignment     = Enum.TextXAlignment.Left
+Title.ZIndex             = 12
+Title.Parent = Header
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size             = UDim2.new(0, 28, 0, 28)
+CloseBtn.Position         = UDim2.new(1, -40, 0.5, -14)
+CloseBtn.BackgroundColor3 = C.Red
+CloseBtn.Text             = "✕"
+CloseBtn.TextColor3       = C.White
+CloseBtn.Font             = Enum.Font.GothamBold
+CloseBtn.TextSize         = 13
+CloseBtn.BorderSizePixel  = 0
+CloseBtn.ZIndex           = 13
+CloseBtn.AutoButtonColor  = false
+Corner(CloseBtn, 7)
+CloseBtn.Parent = Header
+
+-- Header drag
+do
+    local dragging, dragStart, startPos = false, nil, nil
+    Header.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = inp.Position; startPos = MainFrame.Position
+        end
+    end)
+    Header.InputChanged:Connect(function(inp)
+        if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+            local d = inp.Position - dragStart
+            MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+    Header.InputEnded:Connect(function() dragging = false end)
+end
+
+-- Scroll container
+local Container = Instance.new("ScrollingFrame")
+Container.Size                = UDim2.new(1, -20, 1, -62)
+Container.Position            = UDim2.new(0, 10, 0, 58)
+Container.BackgroundTransparency = 1
+Container.BorderSizePixel     = 0
+Container.CanvasSize          = UDim2.new(0,0,0,0)
+Container.AutomaticCanvasSize = Enum.AutomaticSize.Y
+Container.ScrollBarThickness  = 4
+Container.ScrollBarImageColor3 = C.Accent
+Container.ZIndex              = 11
+Container.Parent = MainFrame
+
+local ListLayout = Instance.new("UIListLayout")
+ListLayout.Padding           = UDim.new(0, 8)
+ListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+ListLayout.SortOrder         = Enum.SortOrder.LayoutOrder
+ListLayout.Parent = Container
+
+local UIPad = Instance.new("UIPadding")
+UIPad.PaddingTop    = UDim.new(0, 6)
+UIPad.PaddingBottom = UDim.new(0, 10)
+UIPad.Parent = Container
+
+-- ============================================================
+--  TOGGLE VISIBILITY
+-- ============================================================
+local GUIOpen = false
+
+local function ToggleGUI()
+    GUIOpen = not GUIOpen
+    MainFrame.Visible = GUIOpen
+    ToggleBtn.BackgroundColor3 = GUIOpen and C.Red or C.Header
+    ToggleBtn.Text = GUIOpen and "✕" or "LoL"
+end
+
+ToggleBtn.MouseButton1Click:Connect(ToggleGUI)
+CloseBtn.MouseButton1Click:Connect(ToggleGUI)
+UserInputService.InputBegan:Connect(function(inp, gp)
+    if gp then return end
+    if inp.KeyCode == Enum.KeyCode.RightShift then ToggleGUI() end
+end)
+
+-- ============================================================
+--  UI HELPERS
+-- ============================================================
+local function SectionLabel(text, order)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size               = UDim2.new(0, 440, 0, 22)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = "  " .. text
+    lbl.TextColor3         = C.Muted
+    lbl.Font               = Enum.Font.GothamSemiBold
+    lbl.TextSize           = 11
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    lbl.LayoutOrder        = order
+    lbl.ZIndex             = 12
+    lbl.Parent = Container
+end
+
+local function CreateToggle(label, desc, order, callback)
+    local enabled = false
+
+    local card = Instance.new("Frame")
+    card.Size             = UDim2.new(0, 440, 0, 54)
+    card.BackgroundColor3 = C.Card
+    card.BorderSizePixel  = 0
+    card.LayoutOrder      = order
+    card.ZIndex           = 12
+    Corner(card, 8)
+    card.Parent = Container
+
+    local name = Instance.new("TextLabel")
+    name.Size               = UDim2.new(1, -60, 0, 24)
+    name.Position           = UDim2.new(0, 12, 0, 6)
+    name.BackgroundTransparency = 1
+    name.Text               = label
+    name.TextColor3         = C.Text
+    name.Font               = Enum.Font.GothamBold
+    name.TextSize           = 13
+    name.TextXAlignment     = Enum.TextXAlignment.Left
+    name.ZIndex             = 13
+    name.Parent = card
+
+    local sub = Instance.new("TextLabel")
+    sub.Size               = UDim2.new(1, -60, 0, 18)
+    sub.Position           = UDim2.new(0, 12, 0, 30)
+    sub.BackgroundTransparency = 1
+    sub.Text               = desc
+    sub.TextColor3         = C.Muted
+    sub.Font               = Enum.Font.Gotham
+    sub.TextSize           = 11
+    sub.TextXAlignment     = Enum.TextXAlignment.Left
+    sub.ZIndex             = 13
+    sub.Parent = card
+
+    -- Pill toggle
+    local pill = Instance.new("Frame")
+    pill.Size             = UDim2.new(0, 44, 0, 22)
+    pill.Position         = UDim2.new(1, -54, 0.5, -11)
+    pill.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+    pill.BorderSizePixel  = 0
+    pill.ZIndex           = 13
+    Corner(pill, 11)
+    pill.Parent = card
+
+    local knob = Instance.new("Frame")
+    knob.Size             = UDim2.new(0, 16, 0, 16)
+    knob.Position         = UDim2.new(0, 3, 0.5, -8)
+    knob.BackgroundColor3 = C.Muted
+    knob.BorderSizePixel  = 0
+    knob.ZIndex           = 14
+    Corner(knob, 8)
+    knob.Parent = pill
+
+    local function DoToggle()
+        enabled = not enabled
+        local info = TweenInfo.new(0.15, Enum.EasingStyle.Quad)
+        TweenService:Create(knob, info, {
+            Position = enabled and UDim2.new(0, 25, 0.5, -8) or UDim2.new(0, 3, 0.5, -8),
+            BackgroundColor3 = enabled and C.White or C.Muted,
+        }):Play()
+        TweenService:Create(pill, info, {
+            BackgroundColor3 = enabled and C.Green or Color3.fromRGB(40, 40, 55),
+        }):Play()
+        if callback then callback(enabled) end
+    end
+
+    local hit = Instance.new("TextButton")
+    hit.Size               = UDim2.new(1, 0, 1, 0)
+    hit.BackgroundTransparency = 1
+    hit.Text               = ""
+    hit.ZIndex             = 15
+    hit.Parent = card
+    hit.MouseButton1Click:Connect(DoToggle)
+end
+
+-- ============================================================
+--  FEATURE STATE
+-- ============================================================
+local SilentAimEnabled  = false
+local FOVEnabled        = false
+local FOVRadius         = 150
+local FlyEnabled        = false
+local FlySpeed          = 60
+local NoclipEnabled     = false
+local SkinUnlockEnabled = false
+
+-- ============================================================
+--  FOV CIRCLE
+-- ============================================================
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Visible      = false
+FOVCircle.Transparency = 0.8
+FOVCircle.Color        = Color3.fromRGB(255, 255, 255)
+FOVCircle.Thickness    = 1.5
+FOVCircle.NumSides     = 64
+FOVCircle.Radius       = FOVRadius
+FOVCircle.Filled       = false
+
+RunService.RenderStepped:Connect(function()
+    if FOVCircle.Visible then
+        FOVCircle.Position = UserInputService:GetMouseLocation()
+        FOVCircle.Radius   = FOVRadius
+    end
+end)
+
+-- ============================================================
+--  CLOSEST TARGET
+-- ============================================================
+local function GetClosestTarget()
+    local best, bestDist = nil, FOVRadius
+    local mouse = UserInputService:GetMouseLocation()
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+            local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+            if hrp and hum and hum.Health > 0 then
+                local screen, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+                if onScreen then
+                    local dist = (Vector2.new(screen.X, screen.Y) - mouse).Magnitude
+                    if dist < bestDist then
+                        bestDist = dist
+                        best = plr.Character:FindFirstChild("Head") or hrp
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- ============================================================
+--  SILENT AIM  (improved – also replaces CFrame positions)
+-- ============================================================
+local oldNamecall
+if hookmetamethod then
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        local args = table.pack(...)
+
+        if SilentAimEnabled and (method == "FireServer" or method == "InvokeServer") then
+            local target = GetClosestTarget()
+            if target then
+                for i = 1, args.n do
+                    if typeof(args[i]) == "Vector3" then
+                        -- Aim at head/HRP position
+                        args[i] = target.Position
+                    elseif typeof(args[i]) == "CFrame" then
+                        args[i] = CFrame.new(target.Position)
+                    elseif typeof(args[i]) == "Instance" and args[i]:IsA("BasePart") then
+                        args[i] = target
+                    end
+                end
+            end
+        end
+
+        return oldNamecall(self, table.unpack(args, 1, args.n))
+    end)
+else
+    warn("[Lol V1] hookmetamethod not available – Silent Aim requires a supported executor (Synapse X, KRNL, Fluxus, etc.)")
+end
+
+-- ============================================================
+--  FLY
+-- ============================================================
+local FlyConnection
+local function StartFly()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then return end
+
+    hum.PlatformStand = true
+
+    local bg = Instance.new("BodyGyro")
+    bg.Name      = "LolFlyGyro"
+    bg.MaxTorque = Vector3.new(4e5, 4e5, 4e5)
+    bg.CFrame    = hrp.CFrame
+    bg.Parent    = hrp
+
+    local bv = Instance.new("BodyVelocity")
+    bv.Name      = "LolFlyVelocity"
+    bv.MaxForce  = Vector3.new(4e5, 4e5, 4e5)
+    bv.Velocity  = Vector3.zero
+    bv.Parent    = hrp
+
+    FlyConnection = RunService.RenderStepped:Connect(function()
+        if not FlyEnabled or not hrp or not hrp.Parent then
+            FlyConnection:Disconnect()
+            return
+        end
+        local cf  = Camera.CFrame
+        local dir = Vector3.zero
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += cf.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= cf.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= cf.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += cf.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir -= Vector3.new(0,1,0) end
+        -- Mobile joystick support
+        if hum.MoveDirection.Magnitude > 0 then
+            dir += cf.LookVector * hum.MoveDirection.Z + cf.RightVector * hum.MoveDirection.X
+        end
+        bv.Velocity = dir.Magnitude > 0 and dir.Unit * FlySpeed or Vector3.zero
+        bg.CFrame   = cf
+    end)
+end
+
+local function StopFly()
+    if FlyConnection then FlyConnection:Disconnect() end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hrp then
+        local g = hrp:FindFirstChild("LolFlyGyro")
+        local v = hrp:FindFirstChild("LolFlyVelocity")
+        if g then g:Destroy() end
+        if v then v:Destroy() end
+    end
+    if hum then hum.PlatformStand = false end
+end
+
+-- ============================================================
+--  NOCLIP
+-- ============================================================
+RunService.Stepped:Connect(function()
+    if NoclipEnabled and LocalPlayer.Character then
+        for _, p in ipairs(LocalPlayer.Character:GetDescendants()) do
+            if p:IsA("BasePart") then p.CanCollide = false end
+        end
+    end
+end)
+
+-- ============================================================
+--  UNLOCK ALL SKINS
+-- ============================================================
+local function ToggleSkinUnlock(state)
+    SkinUnlockEnabled = state
+    -- Method 1: PlayerData BoolValues
+    pcall(function()
+        local data = LocalPlayer:FindFirstChild("PlayerData")
+                  or LocalPlayer:FindFirstChild("Data")
+                  or LocalPlayer:FindFirstChild("leaderstats")
+        if data then
+            for _, v in ipairs(data:GetDescendants()) do
+                if v:IsA("BoolValue") and
+                   (v.Name:lower():find("own") or v.Name:lower():find("unlock") or v.Name:lower():find("have") or v.Name:lower():find("skin")) then
+                    v.Value = state
+                end
+            end
+        end
+    end)
+    -- Method 2: getgc scan (executor-only bonus)
+    pcall(function()
+        if getgc then
+            for _, v in ipairs(getgc(true)) do
+                if type(v) == "table" and rawget(v, "OwnedSkins") then
+                    v.OwnedSkins = setmetatable({}, {__index = function() return true end})
+                end
+            end
+        end
+    end)
+end
+
+-- ============================================================
+--  BUILD TOGGLE LIST
+-- ============================================================
+SectionLabel("⚙  COMBAT", 1)
+
+CreateToggle("Silent Aim", "Redirect shots to nearest enemy head", 2, function(on)
+    SilentAimEnabled = on
+end)
+
+CreateToggle("Show FOV Circle", "Visualise silent aim range around crosshair", 3, function(on)
+    FOVEnabled = on
+    FOVCircle.Visible = on
+end)
+
+SectionLabel("🏃  MOVEMENT", 10)
+
+CreateToggle("Fly  (W/A/S/D + Space/Shift | Mobile Joystick)", "Free-fly through the map", 11, function(on)
+    FlyEnabled = on
+    if on then StartFly() else StopFly() end
+end)
+
+CreateToggle("Noclip  (Walk Through Walls)", "Disables collision on your character", 12, function(on)
+    NoclipEnabled = on
+end)
+
+SectionLabel("🎨  COSMETICS", 20)
+
+CreateToggle("Unlock All Skins", "Attempts to unlock all skins locally", 21, function(on)
+    ToggleSkinUnlock(on)
+end)
+
+CreateToggle("Fullbright", "Removes all darkness from the map", 22, function(on)
+    Lighting.Brightness    = on and 5 or 1
+    Lighting.GlobalShadows = not on
+    Lighting.Ambient       = on and Color3.fromRGB(255,255,255) or Color3.fromRGB(70,70,70)
+    Lighting.OutdoorAmbient = on and Color3.fromRGB(255,255,255) or Color3.fromRGB(128,128,128)
+end)
+
+SectionLabel("📱  CONTROLS: RightShift (PC) | LoL Button (Mobile)", 99)
+
+-- ============================================================
+--  RE-APPLY ON RESPAWN
+-- ============================================================
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    if FlyEnabled then StartFly() end
+end)
+
+print("[Lol V1] Loaded ✓  |  RightShift = toggle | LoL button on mobile")
