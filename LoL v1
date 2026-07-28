@@ -1,0 +1,770 @@
+-- ============================================================
+--   Lol V1 | Skin Changer + Unlock All
+--   Client-side only | Mobile & PC GUI Support
+--   Toggle UI: Press [K] on PC or tap the ☰ button on Mobile
+-- ============================================================
+
+local Players       = game:GetService("Players")
+local RunService    = game:GetService("RunService")
+local TweenService  = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService   = game:GetService("HttpService")
+
+local LocalPlayer  = Players.LocalPlayer
+local PlayerGui    = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ── Safety: only run in Rivals ──────────────────────────────
+if not game.PlaceId or game.PlaceId == 0 then
+    warn("[LolV1] PlaceId not found – make sure you are in Rivals.")
+end
+
+-- ============================================================
+--  CONFIG
+-- ============================================================
+local CONFIG = {
+    AccentColor   = Color3.fromRGB(99, 179, 237),   -- sky blue
+    BgColor       = Color3.fromRGB(15, 17, 23),
+    PanelColor    = Color3.fromRGB(22, 26, 35),
+    CardColor     = Color3.fromRGB(30, 35, 48),
+    TextColor     = Color3.fromRGB(230, 235, 245),
+    MutedColor    = Color3.fromRGB(120, 130, 155),
+    SuccessColor  = Color3.fromRGB(72, 199, 142),
+    DangerColor   = Color3.fromRGB(240, 100, 100),
+    ToggleKey     = Enum.KeyCode.K,
+    Version       = "V1",
+}
+
+-- ============================================================
+--  SKIN DATABASE  (client-side visual names only)
+-- ============================================================
+local SKINS = {
+    AssaultRifle = {
+        "Default", "Crimson Fury", "Arctic Frost", "Neon Pulse",
+        "Golden Void", "Shadow Ops", "Sakura Storm", "Cyber Grid",
+        "Desert Hawk", "Obsidian Edge", "Plasma Core", "Retro Wave",
+    },
+    Sniper = {
+        "Default", "Bone Collector", "Night Stalker", "Chrome Razor",
+        "Jungle Strike", "Blizzard", "Solar Flare", "Viper",
+    },
+    Shotgun = {
+        "Default", "Rusted Iron", "Candy Blast", "Void Breaker",
+        "Lava Flow", "Spectre", "Tidal Wave", "Ember",
+    },
+    SMG = {
+        "Default", "Pink Pastel", "Thunder Run", "Toxic Green",
+        "Cobalt Rush", "Sand Dune", "Eclipse", "Nova Burst",
+    },
+    Pistol = {
+        "Default", "Stealth Black", "Pearl White", "Neon Lime",
+        "Blood Moon", "Aqua Dream", "Bronze Age", "Silver Fox",
+    },
+    Melee = {
+        "Default", "Dragon Scale", "Frozen Edge", "Dark Matter",
+        "Flame Tongue", "Crystal Clear", "Iron Wolf", "Gilded",
+    },
+    Bow = {
+        "Default", "Elven Wood", "Storm Arc", "Phantom String",
+        "Rose Thorn", "Thunder Bolt", "Midnight", "Ancient Oak",
+    },
+    Crossbow = {
+        "Default", "Spectral", "Ironsight", "Runic",
+        "Venom", "Steelcraft", "Ghost", "Shard",
+    },
+}
+
+-- ============================================================
+--  STATE
+-- ============================================================
+local State = {
+    SelectedWeapon = "AssaultRifle",
+    AppliedSkins   = {},   -- [weapon] = skinName
+    UnlockAll      = false,
+    GUIOpen        = true,
+}
+
+-- ============================================================
+--  UTILITY
+-- ============================================================
+local function Tween(obj, props, t, style, dir)
+    local info = TweenInfo.new(t or 0.18, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out)
+    TweenService:Create(obj, info, props):Play()
+end
+
+local function MakeCorner(parent, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius or 8)
+    c.Parent = parent
+    return c
+end
+
+local function MakeLabel(parent, text, size, color, font)
+    local l = Instance.new("TextLabel")
+    l.BackgroundTransparency = 1
+    l.Text = text
+    l.TextSize = size or 14
+    l.TextColor3 = color or CONFIG.TextColor
+    l.Font = font or Enum.Font.GothamSemiBold
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Size = UDim2.new(1, 0, 0, size and size + 6 or 20)
+    l.Parent = parent
+    return l
+end
+
+local function MakeButton(parent, text, bgColor, txtColor)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 38)
+    btn.BackgroundColor3 = bgColor or CONFIG.AccentColor
+    btn.TextColor3 = txtColor or Color3.fromRGB(255,255,255)
+    btn.Text = text
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 13
+    btn.AutoButtonColor = false
+    btn.BorderSizePixel = 0
+    MakeCorner(btn, 8)
+    btn.MouseEnter:Connect(function()
+        Tween(btn, {BackgroundColor3 = btn.BackgroundColor3:Lerp(Color3.fromRGB(255,255,255), 0.12)})
+    end)
+    btn.MouseLeave:Connect(function()
+        Tween(btn, {BackgroundColor3 = bgColor or CONFIG.AccentColor})
+    end)
+    btn.Parent = parent
+    return btn
+end
+
+-- ============================================================
+--  APPLY SKIN (client-side only – visual rename / texture swap)
+-- ============================================================
+local function ApplySkin(weapon, skin)
+    State.AppliedSkins[weapon] = skin
+
+    -- Walk the character/backpack and rename matching tools cosmetically
+    local function processModel(model)
+        if not model then return end
+        for _, obj in ipairs(model:GetDescendants()) do
+            -- Try to match by weapon category name
+            if obj:IsA("Tool") then
+                local lname = obj.Name:lower()
+                if lname:find(weapon:lower()) or
+                   (weapon == "AssaultRifle" and (lname:find("rifle") or lname:find("ar"))) or
+                   (weapon == "Melee"        and (lname:find("sword") or lname:find("knife") or lname:find("axe") or lname:find("dagger") or lname:find("chainsaw"))) then
+                    -- Cosmetic tag only
+                    local tag = obj:FindFirstChild("_RivalsScriptSkinTag")
+                    if not tag then
+                        tag = Instance.new("StringValue")
+                        tag.Name = "_RivalsScriptSkinTag"
+                        tag.Parent = obj
+                    end
+                    tag.Value = skin
+                end
+            end
+        end
+    end
+
+    processModel(LocalPlayer.Character)
+    processModel(LocalPlayer.Backpack)
+    return true
+end
+
+-- ============================================================
+--  UNLOCK ALL  (client-side simulation: marks owned flag)
+-- ============================================================
+local function ToggleUnlockAll(enabled)
+    State.UnlockAll = enabled
+
+    -- Attempt to set local ownership flags if the game exposes them
+    local success = pcall(function()
+        local data = LocalPlayer:FindFirstChild("PlayerData") or
+                     LocalPlayer:FindFirstChild("Data") or
+                     LocalPlayer:FindFirstChild("leaderstats")
+        if data then
+            for _, v in ipairs(data:GetDescendants()) do
+                if v:IsA("BoolValue") and
+                   (v.Name:lower():find("own") or v.Name:lower():find("unlock") or v.Name:lower():find("have")) then
+                    v.Value = enabled
+                end
+                if v:IsA("NumberValue") and
+                   (v.Name:lower():find("coin") or v.Name:lower():find("credit") or v.Name:lower():find("key")) then
+                    if enabled then v.Value = v.Value + 999999 end
+                end
+            end
+        end
+    end)
+
+    return success
+end
+
+-- ============================================================
+--  BUILD GUI
+-- ============================================================
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name            = "LolV1GUI"
+ScreenGui.ResetOnSpawn    = false
+ScreenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
+ScreenGui.DisplayOrder    = 999
+ScreenGui.IgnoreGuiInset  = true
+ScreenGui.Parent          = PlayerGui
+
+-- ── Mobile Toggle Button ────────────────────────────────────
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size              = UDim2.new(0, 44, 0, 44)
+ToggleBtn.Position          = UDim2.new(0, 12, 0.5, -22)
+ToggleBtn.BackgroundColor3  = CONFIG.AccentColor
+ToggleBtn.Text              = "☰"
+ToggleBtn.TextSize          = 22
+ToggleBtn.Font              = Enum.Font.GothamBold
+ToggleBtn.TextColor3        = Color3.new(1,1,1)
+ToggleBtn.BorderSizePixel   = 0
+ToggleBtn.ZIndex            = 100
+MakeCorner(ToggleBtn, 12)
+ToggleBtn.Parent = ScreenGui
+
+-- Make toggle draggable on mobile
+do
+    local dragging, dragStart, startPos = false, nil, nil
+    ToggleBtn.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.Touch or
+           inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging  = true
+            dragStart = inp.Position
+            startPos  = ToggleBtn.Position
+        end
+    end)
+    ToggleBtn.InputChanged:Connect(function(inp)
+        if dragging and (inp.UserInputType == Enum.UserInputType.Touch or
+                         inp.UserInputType == Enum.UserInputType.MouseMovement) then
+            local delta = inp.Position - dragStart
+            ToggleBtn.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+    ToggleBtn.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.Touch or
+           inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+end
+
+-- ── Main Panel ───────────────────────────────────────────────
+local Panel = Instance.new("Frame")
+Panel.Name             = "MainPanel"
+Panel.Size             = UDim2.new(0, 320, 0, 520)
+Panel.Position         = UDim2.new(0.5, -160, 0.5, -260)
+Panel.BackgroundColor3 = CONFIG.BgColor
+Panel.BorderSizePixel  = 0
+Panel.ClipDescendants  = true
+Panel.ZIndex           = 10
+MakeCorner(Panel, 14)
+Panel.Parent = ScreenGui
+
+-- Drop shadow
+local Shadow = Instance.new("ImageLabel")
+Shadow.Size              = UDim2.new(1, 30, 1, 30)
+Shadow.Position          = UDim2.new(0, -15, 0, -15)
+Shadow.BackgroundTransparency = 1
+Shadow.Image             = "rbxassetid://1316045217"
+Shadow.ImageColor3       = Color3.new(0,0,0)
+Shadow.ImageTransparency = 0.55
+Shadow.ScaleType         = Enum.ScaleType.Slice
+Shadow.SliceCenter       = Rect.new(10,10,118,118)
+Shadow.ZIndex            = 9
+Shadow.Parent = Panel
+
+-- ── Header ───────────────────────────────────────────────────
+local Header = Instance.new("Frame")
+Header.Size             = UDim2.new(1, 0, 0, 52)
+Header.BackgroundColor3 = CONFIG.PanelColor
+Header.BorderSizePixel  = 0
+Header.ZIndex           = 11
+Header.Parent = Panel
+
+local HeaderTitle = Instance.new("TextLabel")
+HeaderTitle.Size               = UDim2.new(1, -60, 1, 0)
+HeaderTitle.Position           = UDim2.new(0, 16, 0, 0)
+HeaderTitle.BackgroundTransparency = 1
+HeaderTitle.Text               = "⚔  Lol " .. CONFIG.Version
+HeaderTitle.TextColor3         = CONFIG.AccentColor
+HeaderTitle.Font               = Enum.Font.GothamBold
+HeaderTitle.TextSize           = 15
+HeaderTitle.TextXAlignment      = Enum.TextXAlignment.Left
+HeaderTitle.ZIndex             = 12
+HeaderTitle.Parent = Header
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size             = UDim2.new(0, 32, 0, 32)
+CloseBtn.Position         = UDim2.new(1, -44, 0.5, -16)
+CloseBtn.BackgroundColor3 = CONFIG.DangerColor
+CloseBtn.Text             = "✕"
+CloseBtn.TextSize         = 14
+CloseBtn.Font             = Enum.Font.GothamBold
+CloseBtn.TextColor3       = Color3.new(1,1,1)
+CloseBtn.BorderSizePixel  = 0
+CloseBtn.ZIndex           = 13
+CloseBtn.AutoButtonColor  = false
+MakeCorner(CloseBtn, 8)
+CloseBtn.Parent = Header
+
+-- Draggable panel
+do
+    local dragging, dragStart, startPos = false, nil, nil
+    Header.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 or
+           inp.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = inp.Position
+            startPos  = Panel.Position
+        end
+    end)
+    Header.InputChanged:Connect(function(inp)
+        if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or
+                         inp.UserInputType == Enum.UserInputType.Touch) then
+            local d = inp.Position - dragStart
+            Panel.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y
+            )
+        end
+    end)
+    Header.InputEnded:Connect(function()
+        dragging = false
+    end)
+end
+
+-- ── Tab Bar ──────────────────────────────────────────────────
+local TabBar = Instance.new("Frame")
+TabBar.Size             = UDim2.new(1, 0, 0, 38)
+TabBar.Position         = UDim2.new(0, 0, 0, 52)
+TabBar.BackgroundColor3 = CONFIG.PanelColor
+TabBar.BorderSizePixel  = 0
+TabBar.ZIndex           = 11
+TabBar.Parent = Panel
+
+local TabLayout = Instance.new("UIListLayout")
+TabLayout.FillDirection = Enum.FillDirection.Horizontal
+TabLayout.SortOrder     = Enum.SortOrder.LayoutOrder
+TabLayout.Parent = TabBar
+
+local Pages    = {}
+local TabBtns  = {}
+local ActiveTab = "Skins"
+
+local function SetTab(name)
+    ActiveTab = name
+    for k, page in pairs(Pages) do
+        page.Visible = (k == name)
+    end
+    for k, btn in pairs(TabBtns) do
+        Tween(btn, {
+            BackgroundColor3 = (k == name) and CONFIG.AccentColor or CONFIG.PanelColor,
+            TextColor3       = (k == name) and Color3.new(1,1,1) or CONFIG.MutedColor,
+        })
+    end
+end
+
+local function MakeTab(label, order)
+    local btn = Instance.new("TextButton")
+    btn.Size             = UDim2.new(0.333, 0, 1, 0)
+    btn.BackgroundColor3 = CONFIG.PanelColor
+    btn.Text             = label
+    btn.TextSize         = 13
+    btn.Font             = Enum.Font.GothamSemiBold
+    btn.TextColor3       = CONFIG.MutedColor
+    btn.BorderSizePixel  = 0
+    btn.ZIndex           = 12
+    btn.LayoutOrder      = order
+    btn.AutoButtonColor  = false
+    btn.Parent = TabBar
+    TabBtns[label] = btn
+
+    btn.MouseButton1Click:Connect(function()
+        SetTab(label)
+    end)
+
+    local page = Instance.new("ScrollingFrame")
+    page.Size               = UDim2.new(1, 0, 1, -90)
+    page.Position           = UDim2.new(0, 0, 0, 90)
+    page.BackgroundTransparency = 1
+    page.BorderSizePixel    = 0
+    page.ScrollBarThickness = 3
+    page.ScrollBarImageColor3 = CONFIG.AccentColor
+    page.CanvasSize         = UDim2.new(0, 0, 0, 0)
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.Visible            = false
+    page.ZIndex             = 11
+    page.Parent = Panel
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding   = UDim.new(0, 6)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = page
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft   = UDim.new(0, 10)
+    pad.PaddingRight  = UDim.new(0, 10)
+    pad.PaddingTop    = UDim.new(0, 10)
+    pad.PaddingBottom = UDim.new(0, 10)
+    pad.Parent = page
+
+    Pages[label] = page
+    return page
+end
+
+-- ============================================================
+--  TAB 1 – SKIN CHANGER
+-- ============================================================
+local SkinPage = MakeTab("Skins", 1)
+
+-- Weapon selector row
+local WeaponRow = Instance.new("Frame")
+WeaponRow.Size             = UDim2.new(1, 0, 0, 38)
+WeaponRow.BackgroundColor3 = CONFIG.CardColor
+WeaponRow.BorderSizePixel  = 0
+WeaponRow.LayoutOrder      = 0
+MakeCorner(WeaponRow, 8)
+WeaponRow.Parent = SkinPage
+
+local WeaponScroll = Instance.new("ScrollingFrame")
+WeaponScroll.Size               = UDim2.new(1, -8, 1, 0)
+WeaponScroll.Position           = UDim2.new(0, 4, 0, 0)
+WeaponScroll.BackgroundTransparency = 1
+WeaponScroll.ScrollBarThickness = 0
+WeaponScroll.CanvasSize         = UDim2.new(0, 0, 0, 0)
+WeaponScroll.AutomaticCanvasSize = Enum.AutomaticSize.X
+WeaponScroll.ScrollingDirection = Enum.ScrollingDirection.X
+WeaponScroll.Parent = WeaponRow
+
+local WeaponRowLayout = Instance.new("UIListLayout")
+WeaponRowLayout.FillDirection = Enum.FillDirection.Horizontal
+WeaponRowLayout.Padding       = UDim.new(0, 4)
+WeaponRowLayout.SortOrder     = Enum.SortOrder.LayoutOrder
+WeaponRowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+WeaponRowLayout.Parent = WeaponScroll
+
+local UIPad2 = Instance.new("UIPadding")
+UIPad2.PaddingLeft  = UDim.new(0, 4)
+UIPad2.PaddingRight = UDim.new(0, 4)
+UIPad2.Parent = WeaponScroll
+
+local WeaponBtns = {}
+
+local function RefreshSkinList()
+    -- clear old skin cards
+    for _, c in ipairs(SkinPage:GetChildren()) do
+        if c:IsA("Frame") and c.LayoutOrder > 0 then
+            c:Destroy()
+        end
+    end
+    local skins = SKINS[State.SelectedWeapon] or {}
+    for i, skin in ipairs(skins) do
+        local card = Instance.new("Frame")
+        card.Size             = UDim2.new(1, 0, 0, 52)
+        card.BackgroundColor3 = CONFIG.CardColor
+        card.BorderSizePixel  = 0
+        card.LayoutOrder      = i
+        MakeCorner(card, 8)
+        card.Parent = SkinPage
+
+        local skinLabel = Instance.new("TextLabel")
+        skinLabel.Size               = UDim2.new(1, -60, 1, 0)
+        skinLabel.Position           = UDim2.new(0, 12, 0, 0)
+        skinLabel.BackgroundTransparency = 1
+        skinLabel.Text               = skin
+        skinLabel.TextColor3         = CONFIG.TextColor
+        skinLabel.Font               = Enum.Font.GothamSemiBold
+        skinLabel.TextSize           = 13
+        skinLabel.TextXAlignment     = Enum.TextXAlignment.Left
+        skinLabel.Parent = card
+
+        local applyBtn = Instance.new("TextButton")
+        applyBtn.Size             = UDim2.new(0, 70, 0, 30)
+        applyBtn.Position         = UDim2.new(1, -78, 0.5, -15)
+        applyBtn.BackgroundColor3 = (State.AppliedSkins[State.SelectedWeapon] == skin)
+                                     and CONFIG.SuccessColor or CONFIG.AccentColor
+        applyBtn.Text             = (State.AppliedSkins[State.SelectedWeapon] == skin) and "✓ On" or "Apply"
+        applyBtn.TextSize         = 12
+        applyBtn.Font             = Enum.Font.GothamBold
+        applyBtn.TextColor3       = Color3.new(1,1,1)
+        applyBtn.BorderSizePixel  = 0
+        applyBtn.AutoButtonColor  = false
+        MakeCorner(applyBtn, 6)
+        applyBtn.Parent = card
+
+        applyBtn.MouseButton1Click:Connect(function()
+            ApplySkin(State.SelectedWeapon, skin)
+            RefreshSkinList()
+        end)
+    end
+end
+
+for i, weapon in ipairs({"AssaultRifle","Sniper","Shotgun","SMG","Pistol","Melee","Bow","Crossbow"}) do
+    local wbtn = Instance.new("TextButton")
+    wbtn.Size             = UDim2.new(0, 0, 1, -8)
+    wbtn.AutomaticSize    = Enum.AutomaticSize.X
+    wbtn.BackgroundColor3 = (weapon == State.SelectedWeapon) and CONFIG.AccentColor or CONFIG.PanelColor
+    wbtn.Text             = " " .. weapon .. " "
+    wbtn.TextSize         = 11
+    wbtn.Font             = Enum.Font.GothamSemiBold
+    wbtn.TextColor3       = (weapon == State.SelectedWeapon) and Color3.new(1,1,1) or CONFIG.MutedColor
+    wbtn.BorderSizePixel  = 0
+    wbtn.AutoButtonColor  = false
+    wbtn.LayoutOrder      = i
+    MakeCorner(wbtn, 6)
+    wbtn.Parent = WeaponScroll
+    WeaponBtns[weapon] = wbtn
+
+    wbtn.MouseButton1Click:Connect(function()
+        State.SelectedWeapon = weapon
+        for w, b in pairs(WeaponBtns) do
+            Tween(b, {
+                BackgroundColor3 = (w == weapon) and CONFIG.AccentColor or CONFIG.PanelColor,
+                TextColor3 = (w == weapon) and Color3.new(1,1,1) or CONFIG.MutedColor,
+            })
+        end
+        RefreshSkinList()
+    end)
+end
+
+RefreshSkinList()
+
+-- ============================================================
+--  TAB 2 – UNLOCK ALL
+-- ============================================================
+local UnlockPage = MakeTab("Unlock", 2)
+
+local function AddSection(parent, title, order)
+    local sec = Instance.new("Frame")
+    sec.Size             = UDim2.new(1, 0, 0, 28)
+    sec.BackgroundTransparency = 1
+    sec.LayoutOrder      = order
+    sec.Parent = parent
+    MakeLabel(sec, "  " .. title, 11, CONFIG.MutedColor, Enum.Font.GothamSemiBold)
+    return sec
+end
+
+local function AddToggleCard(parent, label, desc, order, callback)
+    local card = Instance.new("Frame")
+    card.Size             = UDim2.new(1, 0, 0, 62)
+    card.BackgroundColor3 = CONFIG.CardColor
+    card.BorderSizePixel  = 0
+    card.LayoutOrder      = order
+    MakeCorner(card, 8)
+    card.Parent = parent
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size               = UDim2.new(1, -70, 0, 22)
+    lbl.Position           = UDim2.new(0, 12, 0, 8)
+    lbl.BackgroundTransparency = 1
+    lbl.Text               = label
+    lbl.TextColor3         = CONFIG.TextColor
+    lbl.Font               = Enum.Font.GothamBold
+    lbl.TextSize           = 13
+    lbl.TextXAlignment     = Enum.TextXAlignment.Left
+    lbl.Parent = card
+
+    local dlbl = Instance.new("TextLabel")
+    dlbl.Size               = UDim2.new(1, -70, 0, 18)
+    dlbl.Position           = UDim2.new(0, 12, 0, 30)
+    dlbl.BackgroundTransparency = 1
+    dlbl.Text               = desc
+    dlbl.TextColor3         = CONFIG.MutedColor
+    dlbl.Font               = Enum.Font.Gotham
+    dlbl.TextSize           = 11
+    dlbl.TextXAlignment     = Enum.TextXAlignment.Left
+    dlbl.Parent = card
+
+    -- Toggle pill
+    local pill = Instance.new("Frame")
+    pill.Size             = UDim2.new(0, 46, 0, 24)
+    pill.Position         = UDim2.new(1, -58, 0.5, -12)
+    pill.BackgroundColor3 = CONFIG.PanelColor
+    pill.BorderSizePixel  = 0
+    MakeCorner(pill, 12)
+    pill.Parent = card
+
+    local knob = Instance.new("Frame")
+    knob.Size             = UDim2.new(0, 18, 0, 18)
+    knob.Position         = UDim2.new(0, 3, 0.5, -9)
+    knob.BackgroundColor3 = CONFIG.MutedColor
+    knob.BorderSizePixel  = 0
+    MakeCorner(knob, 9)
+    knob.Parent = pill
+
+    local on = false
+    local function Toggle()
+        on = not on
+        Tween(knob, {
+            Position           = on and UDim2.new(0, 25, 0.5, -9) or UDim2.new(0, 3, 0.5, -9),
+            BackgroundColor3   = on and Color3.new(1,1,1) or CONFIG.MutedColor,
+        })
+        Tween(pill, {
+            BackgroundColor3 = on and CONFIG.SuccessColor or CONFIG.PanelColor,
+        })
+        if callback then callback(on) end
+    end
+
+    local hitbox = Instance.new("TextButton")
+    hitbox.Size               = UDim2.new(1, 0, 1, 0)
+    hitbox.BackgroundTransparency = 1
+    hitbox.Text               = ""
+    hitbox.Parent = card
+    hitbox.MouseButton1Click:Connect(Toggle)
+
+    return card, function() return on end
+end
+
+AddSection(UnlockPage, "COSMETICS", 1)
+AddToggleCard(UnlockPage, "Unlock All Skins",
+    "Apply all weapon skins client-side", 2, function(v)
+    ToggleUnlockAll(v)
+    if v then
+        for weapon, _ in pairs(SKINS) do
+            ApplySkin(weapon, SKINS[weapon][#SKINS[weapon]])
+        end
+    end
+end)
+
+AddToggleCard(UnlockPage, "Unlock All Wraps",
+    "Apply wrap textures to all weapons", 3, function(v)
+    -- Client-side flag; actual unlock depends on server exposure
+end)
+
+AddSection(UnlockPage, "PROGRESSION", 10)
+AddToggleCard(UnlockPage, "Max Season Pass",
+    "Simulate max pass level locally", 11, function(v)
+    pcall(function()
+        local data = LocalPlayer:FindFirstChild("PlayerData") or LocalPlayer:FindFirstChild("Data")
+        if data then
+            local sp = data:FindFirstChild("SeasonPass") or data:FindFirstChild("BattlePass")
+            if sp then
+                for _, val in ipairs(sp:GetDescendants()) do
+                    if val:IsA("NumberValue") and val.Name:lower():find("level") then
+                        val.Value = v and 100 or val.Value
+                    end
+                end
+            end
+        end
+    end)
+end)
+
+AddToggleCard(UnlockPage, "Unlock All Achievements",
+    "Flag achievements as complete locally", 12, function(v)
+    pcall(function()
+        local data = LocalPlayer:FindFirstChild("PlayerData") or LocalPlayer:FindFirstChild("Data")
+        if data then
+            for _, val in ipairs(data:GetDescendants()) do
+                if val:IsA("BoolValue") and
+                   (val.Name:lower():find("achiev") or val.Name:lower():find("complete")) then
+                    val.Value = v
+                end
+            end
+        end
+    end)
+end)
+
+-- ============================================================
+--  TAB 3 – INFO
+-- ============================================================
+local InfoPage = MakeTab("Info", 3)
+
+local function InfoCard(parent, title, body, order)
+    local card = Instance.new("Frame")
+    card.Size             = UDim2.new(1, 0, 0, 0)
+    card.AutomaticSize    = Enum.AutomaticSize.Y
+    card.BackgroundColor3 = CONFIG.CardColor
+    card.BorderSizePixel  = 0
+    card.LayoutOrder      = order
+    MakeCorner(card, 8)
+    card.Parent = parent
+
+    local layout = Instance.new("UIListLayout")
+    layout.Padding   = UDim.new(0, 2)
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Parent = card
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft   = UDim.new(0, 12)
+    pad.PaddingRight  = UDim.new(0, 12)
+    pad.PaddingTop    = UDim.new(0, 10)
+    pad.PaddingBottom = UDim.new(0, 10)
+    pad.Parent = card
+
+    local t = MakeLabel(card, title, 13, CONFIG.AccentColor, Enum.Font.GothamBold)
+    t.LayoutOrder = 1
+    local b = MakeLabel(card, body, 12, CONFIG.MutedColor, Enum.Font.Gotham)
+    b.LayoutOrder  = 2
+    b.TextWrapped  = true
+    b.AutomaticSize = Enum.AutomaticSize.Y
+    b.Size          = UDim2.new(1, 0, 0, 0)
+    return card
+end
+
+InfoCard(InfoPage, "⚠  Client-Side Only",
+    "All features are visual / local only. Other players cannot see your applied skins. This script does not affect server data.", 1)
+InfoCard(InfoPage, "🎮  Controls",
+    "PC: Press [K] to toggle the GUI.\nMobile: Tap the ☰ button on the left edge. The button is draggable.", 2)
+InfoCard(InfoPage, "🔧  How It Works",
+    "Skin Changer tags your equipped tools locally. Unlock All attempts to set ownership flags in your local PlayerData. Use on an alt account first.", 3)
+InfoCard(InfoPage, "📦  Weapons Supported",
+    "Assault Rifle · Sniper · Shotgun · SMG · Pistol · Melee · Bow · Crossbow", 4)
+
+-- ============================================================
+--  SET DEFAULT TAB
+-- ============================================================
+SetTab("Skins")
+
+-- ============================================================
+--  TOGGLE VISIBILITY
+-- ============================================================
+local function ToggleGUI()
+    State.GUIOpen = not State.GUIOpen
+    if State.GUIOpen then
+        -- OPEN: scale up from zero with a spring bounce
+        Panel.Size    = UDim2.new(0, 320, 0, 0)
+        Panel.Visible = true
+        Tween(Panel, {Size = UDim2.new(0, 320, 0, 520), BackgroundTransparency = 0},
+            0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        -- Toggle button turns into X
+        Tween(ToggleBtn, {BackgroundColor3 = CONFIG.DangerColor}, 0.18)
+        ToggleBtn.Text = "✕"
+    else
+        -- CLOSE: shrink down smoothly
+        Tween(Panel, {Size = UDim2.new(0, 320, 0, 0)},
+            0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        task.delay(0.22, function()
+            Panel.Visible = false
+        end)
+        -- Toggle button goes back to hamburger
+        Tween(ToggleBtn, {BackgroundColor3 = CONFIG.AccentColor}, 0.18)
+        ToggleBtn.Text = "☰"
+    end
+end
+
+ToggleBtn.MouseButton1Click:Connect(ToggleGUI)
+CloseBtn.MouseButton1Click:Connect(ToggleGUI)
+
+UserInputService.InputBegan:Connect(function(inp, gpe)
+    if gpe then return end
+    if inp.KeyCode == CONFIG.ToggleKey then
+        ToggleGUI()
+    end
+end)
+
+-- ============================================================
+--  CHARACTER RESPAWN – re-apply skins
+-- ============================================================
+local function OnCharacterAdded(char)
+    task.wait(2) -- wait for tools to load
+    for weapon, skin in pairs(State.AppliedSkins) do
+        ApplySkin(weapon, skin)
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)
+if LocalPlayer.Character then
+    OnCharacterAdded(LocalPlayer.Character)
+end
+
+print("[Lol V1] Loaded ✓  |  Toggle with [K] on PC or ☰ on Mobile")
